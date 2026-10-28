@@ -1,5 +1,5 @@
 // WebGL2 renderer: scene pass (particles or image) → one pass per enabled operator, in user order → screen.
-import { VS_QUAD, VS_PART, FS_PART, FS_IMG, FS_BLIT, FS_FACE, OP_FS } from './shaders.js';
+import { VS_QUAD, VS_PART, FS_PART, FS_IMG, FS_BLIT, FS_FACE, FS_SEG, FS_MOTION, OP_FS } from './shaders.js';
 import { PALS } from './ops.js';
 
 export class Renderer {
@@ -7,7 +7,9 @@ export class Renderer {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
     if (!gl) throw new Error('WebGL2 is not available');
     this.gl = gl; this.canvas = canvas;
-    this.P = { part: this.prog(VS_PART, FS_PART), img: this.prog(VS_QUAD, FS_IMG), blit: this.prog(VS_QUAD, FS_BLIT), face: this.prog(VS_QUAD, FS_FACE) };
+    this.P = { part: this.prog(VS_PART, FS_PART), img: this.prog(VS_QUAD, FS_IMG), blit: this.prog(VS_QUAD, FS_BLIT), face: this.prog(VS_QUAD, FS_FACE), seg: this.prog(VS_QUAD, FS_SEG), motion: this.prog(VS_QUAD, FS_MOTION) };
+    this.sx = null; this.maskTex = null; this.maskW = 0; this.maskH = 0; this.hasMask = false;
+    this.mo = null; this.moI = 0; this.moBuf = null;
     this.faceBuf = new Float32Array(16 * 4); this.fx = null;
     this.ops = {};
     for (const id in OP_FS) this.ops[id] = this.prog(VS_QUAD, OP_FS[id]);
@@ -67,7 +69,57 @@ export class Renderer {
       if (this.fx) { gl.deleteFramebuffer(this.fx.f); gl.deleteTexture(this.fx.tex); }
       this.fx = { ...this.target(fw, fh), w: fw, h: fh };
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      if (this.sx) { gl.deleteFramebuffer(this.sx.f); gl.deleteTexture(this.sx.tex); }
+      this.sx = { ...this.target(fw, fh), w: fw, h: fh };
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     }
+  }
+
+  setMask(data, w, h) {
+    const gl = this.gl;
+    if (!this.maskTex) { this.maskTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.maskTex); this.texParams(gl.LINEAR); }
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    this.maskW = w; this.maskH = h; this.hasMask = true;
+  }
+  clearMask() { this.hasMask = false; }
+
+  /** Cuts people out of the source (after face hiding). Returns the texture later passes should sample. */
+  segSource(S, inTex, time) {
+    if (!S || !S.on || !this.hasMask || !this.sx) return inTex;
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sx.f); gl.viewport(0, 0, this.sx.w, this.sx.h);
+    this.use(this.P.seg);
+    this.bindTex(0, inTex); this.i('uSrc', 0);
+    this.bindTex(1, this.maskTex); this.i('uMask', 1);
+    this.f('uSrcSize', this.sx.w, this.sx.h); this.f('uMaskSize', this.maskW, this.maskH); this.f('uTime', time);
+    for (const k of ['mode', 'threshold', 'softness', 'blur', 'hue', 'rim']) this.f('u_' + k, S[k]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.bindTex(0, this.sx.tex); gl.generateMipmap(gl.TEXTURE_2D);
+    return this.sx.tex;
+  }
+
+  /** Low-res frame differencing. Returns { level 0–1, x, y in texture space (y up) }. */
+  motion(prev) {
+    const gl = this.gl, MW = 80, MH = 45;
+    if (!this.mo) { this.mo = [this.target(MW, MH), this.target(MW, MH)]; this.moBuf = new Uint8Array(MW * MH * 4); }
+    const dst = this.mo[1 - this.moI], src = this.mo[this.moI];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.f); gl.viewport(0, 0, MW, MH);
+    this.use(this.P.motion);
+    this.bindTex(0, this.src); this.i('uSrc', 0);
+    this.bindTex(1, src.tex); this.i('uPrev', 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, MW, MH, gl.RGBA, gl.UNSIGNED_BYTE, this.moBuf);
+    this.moI = 1 - this.moI;
+    let sum = 0, sx = 0, sy = 0;
+    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+      const a = this.moBuf[(y * MW + x) * 4 + 3] / 255;
+      sum += a; sx += a * (x + .5) / MW; sy += a * (y + .5) / MH;
+    }
+    const level = Math.min(1, sum / (MW * MH) * 9);
+    return sum > .5 ? { level, x: sx / sum, y: sy / sum } : { level, x: prev?.x ?? .5, y: prev?.y ?? .5 };
   }
 
   /** Hides faces on the source texture. Returns the texture the scene should sample. */
@@ -112,7 +164,7 @@ export class Renderer {
 
   /** Draws one frame. Returns the number of particles drawn. */
   render({ E, order, acc, mouse, mouseForce, time, flowT, rot, dpr, compare, faces }) {
-    const src = this.faceSource(E.faceblur, faces);
+    const src = this.segSource(E.segment, this.faceSource(E.faceblur, faces), time);
     const gl = this.gl, { W, H } = this, aspect = W / H, fit = this.fit(), sa = this.srcW / this.srcH;
     const T = E.touch, force = T.on ? mouseForce * T.force : 0;
 

@@ -1,9 +1,15 @@
-# Attach TFLite metadata (input normalization to [-1, 1]) so MediaPipe Tasks can load the BlazeFace model.
+# Attach TFLite metadata (input normalization) so MediaPipe Tasks can load the legacy MediaPipe models.
+# usage: add-face-model-metadata.py SRC DST [MEAN STD NAME]
+#   BlazeFace face detector:   mean 127.5, std 127.5  (pixels to [-1, 1])  — the default
+#   Selfie segmentation:       mean 0,     std 255    (pixels to [0, 1])
 import sys, flatbuffers
 from mediapipe.tasks.metadata import metadata_schema_py_generated as M
 from mediapipe.tasks.metadata import schema_py_generated as S
 
 src, dst = sys.argv[1], sys.argv[2]
+mean = float(sys.argv[3]) if len(sys.argv) > 3 else 127.5
+std = float(sys.argv[4]) if len(sys.argv) > 4 else 127.5
+title = sys.argv[5] if len(sys.argv) > 5 else 'BlazeFace short-range'
 buf = bytearray(open(src, 'rb').read())
 model = S.ModelT.InitFromObj(S.Model.GetRootAsModel(buf, 0))
 sg = model.subgraphs[0]
@@ -16,10 +22,10 @@ def content(kind, props):
 img = M.TensorMetadataT(); img.name = 'image'; img.description = 'Input RGB image'
 ip = M.ImagePropertiesT(); ip.colorSpace = M.ColorSpaceType.RGB
 img.content = content(M.ContentProperties.ImageProperties, ip)
-norm = M.NormalizationOptionsT(); norm.mean = [127.5]; norm.std = [127.5]
+norm = M.NormalizationOptionsT(); norm.mean = [mean]; norm.std = [std]
 pu = M.ProcessUnitT(); pu.optionsType = M.ProcessUnitOptions.NormalizationOptions; pu.options = norm
 img.processUnits = [pu]
-st = M.StatsT(); st.max = [1.0]; st.min = [-1.0]; img.stats = st
+st = M.StatsT(); st.max = [(255 - mean) / std]; st.min = [(0 - mean) / std]; img.stats = st
 
 outs = []
 for n in names(sg.outputs):
@@ -28,8 +34,8 @@ for n in names(sg.outputs):
     outs.append(t)
 
 sgm = M.SubGraphMetadataT(); sgm.inputTensorMetadata = [img]; sgm.outputTensorMetadata = outs
-md = M.ModelMetadataT(); md.name = 'BlazeFace short-range'; md.version = '1'; md.minParserVersion = '1.0.0'
-md.description = 'MediaPipe BlazeFace short-range face detector (Apache-2.0) with input normalization metadata.'
+md = M.ModelMetadataT(); md.name = title; md.version = '1'; md.minParserVersion = '1.0.0'
+md.description = f'MediaPipe {title} (Apache-2.0) with input normalization metadata.'
 md.subgraphMetadata = [sgm]
 b = flatbuffers.Builder(0); b.Finish(md.Pack(b), b'M001'); meta = b.Output()
 

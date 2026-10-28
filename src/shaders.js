@@ -145,6 +145,47 @@ void main(){
   o=vec4(col,1.);
 }`;
 
+// Person cutout on the source texture. uMask comes from the segmenter with its top row first.
+// Modes: 0 remove background, 1 blur background, 2 color background, 3 keep only background.
+export const FS_SEG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uSrc, uMask; uniform vec2 uSrcSize, uMaskSize; uniform float uTime;
+uniform float u_mode, u_threshold, u_softness, u_blur, u_hue, u_rim;
+vec3 hsv(vec3 c){ vec3 p=abs(fract(c.xxx+vec3(1.,2./3.,1./3.))*6.-3.); return c.z*mix(vec3(1.),clamp(p-1.,0.,1.),c.y); }
+float A(vec2 uv){ float r=texture(uMask, vec2(uv.x, 1.-uv.y)).r; float h=u_softness*.5+.002; return smoothstep(u_threshold-h, u_threshold+h, r); }
+void main(){
+  vec3 c=textureLod(uSrc,vUv,0.).rgb;
+  float a=A(vUv);
+  vec3 col;
+  if(u_mode<.5) col=c*a;
+  else if(u_mode<1.5){
+    float R=max(uSrcSize.x,uSrcSize.y)*.02*u_blur; float lod=max(0.,log2(R/5.)); vec3 s=vec3(0);
+    for(int k=0;k<24;k++){ float ang=float(k)*2.39996; float rr=sqrt((float(k)+.5)/24.)*R; s+=textureLod(uSrc, vUv+vec2(cos(ang),sin(ang))*rr/uSrcSize, lod).rgb; }
+    col=mix(s/24., c, a);
+  }
+  else if(u_mode<2.5){ vec3 bg=hsv(vec3(u_hue/360., .7, .5))*(.55+.45*vUv.y); col=mix(bg, c, a); }
+  else col=c*(1.-a);
+  if(u_rim>0.){
+    vec2 px=1.5/uMaskSize;
+    float gx=A(vUv+vec2(px.x,0))-A(vUv-vec2(px.x,0)), gy=A(vUv+vec2(0,px.y))-A(vUv-vec2(0,px.y));
+    float rim=clamp(length(vec2(gx,gy))*1.6,0.,1.);
+    col+=rim*u_rim*hsv(vec3(fract(u_hue/360.+uTime*.04), .55, 1.))*1.6;
+  }
+  o=vec4(col,1.);
+}`;
+
+// Motion: rgb = this frame at low resolution, a = change since the previous frame.
+export const FS_MOTION = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uSrc, uPrev;
+void main(){
+  vec3 c=textureLod(uSrc,vUv,5.).rgb; vec3 p=texture(uPrev,vUv).rgb;
+  float d=abs(dot(c-p, vec3(.299,.587,.114)));
+  o=vec4(c, clamp((d-.025)*7.,0.,1.));
+}`;
+
 const HEAD = `#version 300 es
 precision highp float;
 in vec2 vUv; out vec4 o;

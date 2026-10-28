@@ -21,6 +21,8 @@ const P = {
   pause: '<rect x="4" y="3" width="3" height="10" rx=".6" fill="currentColor" stroke="none"/><rect x="9" y="3" width="3" height="10" rx=".6" fill="currentColor" stroke="none"/>',
   reset: '<path d="M2.6 8a5.4 5.4 0 1 0 1.7-3.9"/><path d="M2.6 2.6v3h3"/>',
   face: '<circle cx="8" cy="8" r="6.2"/><circle cx="6" cy="6.8" r=".6" fill="currentColor"/><circle cx="10" cy="6.8" r=".6" fill="currentColor"/><path d="M5.6 10.1c.7.8 1.5 1.1 2.4 1.1s1.7-.3 2.4-1.1"/>',
+  midi: '<circle cx="8" cy="8" r="6.2"/><circle cx="5" cy="8" r=".6" fill="currentColor"/><circle cx="11" cy="8" r=".6" fill="currentColor"/><circle cx="6" cy="5.4" r=".6" fill="currentColor"/><circle cx="10" cy="5.4" r=".6" fill="currentColor"/><circle cx="8" cy="4.6" r=".6" fill="currentColor"/><path d="M7 12.6h2"/>',
+  screen: '<rect x="1.8" y="2.8" width="12.4" height="8.4" rx="1.2"/><path d="M5.5 13.6h5M8 11.2v2.4"/>',
   left: '<path d="M10 3.5 5.5 8l4.5 4.5"/>',
   right: '<path d="M6 3.5 10.5 8 6 12.5"/>',
 };
@@ -63,6 +65,10 @@ export function createUI(app) {
   /* ---------- network ---------- */
   function summary(op) {
     const e = app.E[op.id];
+    if (op.id === 'segment') {
+      if (!e?.on) return 'off';
+      const g = app.segmenter; return g.status === 'loading' ? 'loading…' : g.status === 'error' ? 'unavailable' : g.ready ? ['remove bg', 'blur bg', 'color bg', 'bg only'][e.mode] : 'starting';
+    }
     if (op.id === 'faceblur') {
       if (!e?.on) return 'off';
       const f = app.faces; if (f.status === 'loading') return 'loading…'; if (f.status === 'error') return 'full frame';
@@ -74,7 +80,7 @@ export function createUI(app) {
   }
   function renderNetwork() {
     net.innerHTML = ''; nodeVals = {};
-    ['source', 'faceblur', 'particles', 'touch', ...app.state.order, 'out'].forEach((id, i) => {
+    ['source', 'faceblur', 'segment', 'particles', 'touch', ...app.state.order, 'out'].forEach((id, i) => {
       if (i) net.appendChild(el('span', 'wire'));
       net.appendChild(makeNode(id));
     });
@@ -150,7 +156,7 @@ export function createUI(app) {
       <div class="insp-title"><h2>${op.label}</h2>${op.always ? '' : `<button class="switch" type="button" aria-pressed="${st.on}" aria-label="${op.label} on" title="On or bypassed (B)"></button>`}</div>
       <div class="insp-sub"><span class="famtag">${op.fam}</span><code>${op.node}</code>${op.stage === 'post' ? `<span>· step ${i + 1} of ${app.state.order.length}</span>` : ''}</div>
       <p class="insp-desc">${op.desc}</p>
-      ${op.id === 'faceblur' ? '<p class="insp-status" id="opStatus" role="status"></p>' : ''}
+      ${op.id === 'faceblur' || op.id === 'segment' ? '<p class="insp-status" id="opStatus" role="status"></p>' : ''}
       <div class="insp-tools">
         <button class="tb sm" type="button" data-act="reset" data-icon="reset"><span>Reset</span></button>
         ${op.stage === 'post' ? `<button class="tb sm" type="button" data-act="left" data-icon="left" title="Move earlier (Alt+←)" ${i <= 0 ? 'disabled' : ''}><span>Earlier</span></button>
@@ -180,10 +186,12 @@ export function createUI(app) {
   }
   function rangeRow(op, p) {
     const key = `${op.id}.${p.k}`, id = `p-${op.id}-${p.k}`, m = app.state.mods[key], v = app.state.ops[op.id][p.k];
-    const row = el('div', 'prm' + (m ? ' modded' : ''));
+    const row = el('div', 'prm' + (m ? ' modded' : '') + (app.midi?.learning ? ' learnable' : '') + (app.midi?.armed === key ? ' armed' : ''));
+    row.dataset.key = key;
+    const cc = app.midi?.labelFor(key) || '';
     row.innerHTML = `<div class="prm-head"><label for="${id}">${p.label}</label>
       <button class="mod-btn" type="button" aria-pressed="${!!m}" title="${m ? 'Stop animating' : 'Animate with an LFO or audio'}" aria-label="Animate ${p.label}">${icon('wave')}</button>
-      <output for="${id}"></output></div>
+      ${cc ? `<button class="midi-badge" type="button" title="${app.midi.learning ? 'Remove this MIDI mapping' : 'Mapped to a MIDI control'}">${cc}</button>` : ''}<output for="${id}"></output></div>
       <div class="track"><input type="range" id="${id}" min="${p.min}" max="${p.max}" step="${p.step}" value="${v}" title="Double-click to reset">${m ? '<span class="live"></span>' : ''}</div>`;
     const inp = row.querySelector('input'), out = row.querySelector('output');
     out.textContent = fmt(p, v); paint(inp);
@@ -191,6 +199,13 @@ export function createUI(app) {
     inp.addEventListener('change', () => app.commit());
     inp.addEventListener('dblclick', () => { inp.value = p.def; app.setParam(op.id, p.k, p.def); out.textContent = fmt(p, p.def); paint(inp); app.commit(); });
     row.querySelector('.mod-btn').addEventListener('click', () => app.setMod(key, m ? null : { src: 'lfo', rate: .25, depth: .25 }));
+    row.addEventListener('pointerdown', () => {
+      if (!app.midi?.learning) return;
+      app.midi.armed = key;
+      insp.querySelectorAll('.prm.armed').forEach(r => r.classList.remove('armed'));
+      row.classList.add('armed');
+    }, true);
+    row.querySelector('.midi-badge')?.addEventListener('click', () => { if (app.midi.learning) { app.midi.unmap(key); renderInspector(); } });
     if (m) { row.appendChild(modBox(key, m)); live.push({ p, opId: op.id, liveEl: row.querySelector('.live'), out }); }
     return row;
   }
@@ -212,7 +227,8 @@ export function createUI(app) {
     };
     if (m.src === 'lfo') row('Rate', 'rate', .02, 4, .01, v => v.toFixed(2) + ' Hz');
     row('Depth', 'depth', -1, 1, .01, v => (v > 0 ? '+' : '') + Math.round(v * 100) + '%');
-    if (m.src !== 'lfo' && app.audio.kind === 'off') box.appendChild(el('p', 'note', 'No audio yet. Turn on Mic or load a Song in the library.'));
+    if (m.src === 'motion') { const k = app.sources.cur?.kind; if (k !== 'video' && k !== 'camera') box.appendChild(el('p', 'note', 'Motion needs a video or the camera.')); }
+    else if (m.src !== 'lfo' && app.audio.kind === 'off') box.appendChild(el('p', 'note', 'No audio yet. Turn on Mic or load a Song in the library.'));
     return box;
   }
   function enumRow(op, p) {
@@ -322,7 +338,15 @@ export function createUI(app) {
     if (n % 8 === 0) syncFaceToggle();
     if (n % 8 === 0) $('.thumb').classList.toggle('private', !!app.state.ops.faceblur.on && app.sources.cur?.kind !== 'sample');
     const st = insp.querySelector('#opStatus');
-    if (st && n % 8 === 0) { const txt = app.state.ops.faceblur.on ? app.faces.statusText() : 'Off. Turn it on to hide faces.'; if (st.textContent !== txt) st.textContent = txt; st.dataset.state = app.faces.status; }
+    if (st && n % 8 === 0) {
+      const seg = app.selected === 'segment', eng = seg ? app.segmenter : app.faces, on = app.state.ops[app.selected].on;
+      const kind = app.sources.cur?.kind;
+      const txt = !on ? (seg ? 'Off. Turn it on to cut people out.' : 'Off. Turn it on to hide faces.')
+        : kind === 'sample' ? 'Load a photo, video or the camera. The sample image has no people.'
+        : eng.statusText();
+      if (st.textContent !== txt) st.textContent = txt;
+      st.dataset.state = !on || kind === 'sample' ? 'idle' : eng.status;
+    }
     if (n % 4 === 0) for (const id in nodeVals) {
       const op = OPMAP[id]; nodeVals[id].textContent = summary(op);
       nodeVals[id].classList.toggle('live', Object.keys(app.state.mods).some(k => k.startsWith(id + '.')));
@@ -341,6 +365,14 @@ export function createUI(app) {
     if (b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', on);
     const f = app.faces, txt = !on ? 'Face blur' : f.status === 'loading' ? 'Face blur · loading' : f.ready ? `Face blur · ${f.tracks.length}` : 'Face blur';
     const lab = b.querySelector('.ft-label'); if (lab.textContent !== txt) lab.textContent = txt;
+  }
+  /** Reflects a value changed from outside the slider (MIDI) without rebuilding the inspector. */
+  function syncParam(opId, k) {
+    if (app.selected !== opId) return;
+    const p = OPMAP[opId].params.find(x => x.k === k), inp = insp.querySelector(`#p-${opId}-${k}`);
+    if (!inp || !p) return;
+    inp.value = app.state.ops[opId][k]; paint(inp);
+    const row = inp.closest('.prm'); if (!row.classList.contains('modded')) row.querySelector('output').textContent = fmt(p, +inp.value);
   }
   function setRecording(on) {
     const b = $('#rec'); b.setAttribute('aria-pressed', on);
@@ -367,5 +399,5 @@ export function createUI(app) {
     renderNetwork(); renderInspector(); renderPresets(); renderAudio();
   }
 
-  return { syncFaceToggle, renderAll, renderNetwork, renderInspector, renderPresets, renderSource, renderAudio, renderHelp, drawThumb, setPlayIcon, tick, toast, setRecording, focusNode };
+  return { syncParam, syncFaceToggle, renderAll, renderNetwork, renderInspector, renderPresets, renderSource, renderAudio, renderHelp, drawThumb, setPlayIcon, tick, toast, setRecording, focusNode };
 }

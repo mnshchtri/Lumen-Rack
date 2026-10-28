@@ -34,6 +34,10 @@
       <button class="tb rec" id="rec" type="button" aria-pressed="false" title="Record video (V)"><i></i><span>Record</span></button>
     </div>
     <div class="tb-group">
+      <button class="tb" id="midiBtn" type="button" data-icon="midi" aria-pressed="false" title="MIDI learn: click a slider, then turn a knob"><span>MIDI</span></button>
+      <button class="tb" id="outputBtn" type="button" data-icon="screen" title="Open a clean output window for a projector or second screen"><span>Output</span></button>
+    </div>
+    <div class="tb-group">
       <button class="ib" id="help" type="button" data-icon="keyboard" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
       <button class="ib" id="immersive" type="button" data-icon="expand" title="Hide panels (H)" aria-label="Hide panels"></button>
     </div>
@@ -60,12 +64,13 @@
     </section>
 
     <section class="card" id="audioCard">
-      <div class="card-head"><h2>Audio</h2><span class="tag" id="audioKind">Off</span></div>
+      <div class="card-head"><h2>Audio &amp; motion</h2><span class="tag" id="audioKind">Off</span></div>
       <div class="meters" id="meters">
         <div class="meter" data-band="bass"><span>Bass</span><b><i></i></b></div>
         <div class="meter" data-band="mid"><span>Mid</span><b><i></i></b></div>
         <div class="meter" data-band="high"><span>High</span><b><i></i></b></div>
         <div class="meter" data-band="level"><span>Level</span><b><i></i></b></div>
+        <div class="meter" data-band="motion"><span>Motion</span><b><i></i></b></div>
       </div>
       <div class="btn-row">
         <button class="tb" id="mic" type="button" data-icon="mic"><span>Mic</span></button>
@@ -73,11 +78,11 @@
         <button class="tb" id="vidAudio" type="button" hidden><span>Video sound</span></button>
         <button class="tb" id="audioStop" type="button" hidden><span>Stop</span></button>
       </div>
-      <p class="note">Press <span class="wave-ico" data-icon="wave"></span> beside any slider and pick Bass, Mid, High or Level to make it move with the music.</p>
+      <p class="note">Press <span class="wave-ico" data-icon="wave"></span> beside any slider and pick Bass, Mid, High or Level to move it with music, or Motion to move it with whatever moves on camera.</p>
     </section>
 
     <section class="card" id="presetCard">
-      <div class="card-head"><h2>Presets</h2><button class="link" id="savePresetBtn" type="button">Save current</button></div>
+      <div class="card-head"><h2>Presets</h2><div class="head-actions"><button class="chip-toggle" id="autoVJ" type="button" aria-pressed="false" title="Switch looks automatically on the beat">Auto VJ</button><button class="link" id="savePresetBtn" type="button">Save current</button></div></div>
       <form class="save-form" id="saveForm" hidden>
         <input id="presetName" type="text" placeholder="Name this look" maxlength="32" autocomplete="off" aria-label="Preset name">
         <button class="tb primary sm" type="submit">Save</button>

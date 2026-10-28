@@ -7,6 +7,8 @@ import { createRecorder, saveBlob, stamp } from './recorder.js';
 import { defaultState, sanitize, fromPartial, encodeState, decodeState, History, store, clone } from './state.js';
 import { createUI, hydrateIcons } from './ui.js';
 import { FaceTracker } from './faces.js';
+import { Segmenter } from './segment.js';
+import { Midi } from './midi.js';
 
 const $ = s => document.querySelector(s);
 const KEY = 'lumen-rack:v2', PKEY = 'lumen-rack:presets', OKEY = 'lumen-rack:onboarded';
@@ -22,7 +24,7 @@ function start() {
   const app = {
     state: null, E: {}, selected: 'particles', activePreset: null,
     userPresets: store.get(PKEY, []),
-    audio: new AudioEngine(), faces: new FaceTracker(), sources: null, recorder: null,
+    audio: new AudioEngine(), faces: new FaceTracker(), segmenter: new Segmenter(), sources: null, recorder: null,
   };
   let shared = false;
   const hash = new URLSearchParams(location.hash.slice(1)).get('s');
@@ -49,7 +51,7 @@ function start() {
 
   Object.assign(app, {
     commit() { hist.push(app.state); persist(); refreshUndo(); },
-    setParam(id, k, v) { app.state.ops[id][k] = v; clearPreset(); },
+    setParam(id, k, v) { morph = null; app.state.ops[id][k] = v; clearPreset(); },
     toggleOp(id) {
       if (OPMAP[id].always) return;
       app.state.ops[id].on = !app.state.ops[id].on; clearPreset(); app.commit();
@@ -76,10 +78,15 @@ function start() {
       for (const k in app.state.mods) if (k.startsWith(id + '.')) delete app.state.mods[k];
       clearPreset(); app.commit(); ui.renderInspector(); ui.renderNetwork();
     },
-    applyPreset(pr) {
-      const keepFace = app.state.ops.faceblur;
-      app.state = fromPartial(pr.s); app.state.ops.faceblur = keepFace; app.activePreset = pr.name; app.commit(); ui.renderAll();
-      ui.toast(pr.name);
+    applyPreset(pr, { quiet = false, instant = false } = {}) {
+      const prev = clone(app.state);
+      const next = fromPartial(pr.s);
+      next.ops.faceblur = clone(prev.ops.faceblur);                      // privacy setting never changes with a look
+      if (!pr.s.ops?.segment) next.ops.segment = clone(prev.ops.segment); // keep the cutout unless the preset sets one
+      app.state = next; app.activePreset = pr.name;
+      morph = instant || reduceMotion ? null : { from: prev, to: clone(next), t0: performance.now(), dur: 1400 };
+      app.commit(); ui.renderAll();
+      if (!quiet) ui.toast(pr.name);
     },
     savePreset(name) {
       const h = Math.floor(Math.random() * 360);
@@ -102,7 +109,98 @@ function start() {
       $('#upload').focus();
     },
   });
-  function restore(s) { app.state = sanitize(s); app.activePreset = null; persist(); ui.renderAll(); refreshUndo(); }
+  /* ---------- preset morphing ---------- */
+  let morph = null;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function stepMorph(now) {
+    if (!morph) return;
+    const k = Math.min(1, (now - morph.t0) / morph.dur), e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    for (const op of OPS) {
+      if (op.stage === 'source') continue;
+      const a = morph.from.ops[op.id], b = morph.to.ops[op.id], o = app.state.ops[op.id];
+      for (const p of op.params) if (p.type === 'range') {
+        let v = a[p.k] + (b[p.k] - a[p.k]) * e;
+        o[p.k] = p.step >= 1 ? Math.round(v) : v;
+      }
+    }
+    if (k >= 1) { morph = null; app.state = sanitize(app.state); persist(); ui.renderInspector(); }
+  }
+
+  /* ---------- auto VJ ---------- */
+  const vj = { on: false, beats: 0, avg: 0, lastBeat: 0, lastSwitch: 0 };
+  function stepVJ(now) {
+    if (!vj.on) return;
+    const bass = app.audio.bands.bass;
+    vj.avg += (bass - vj.avg) * .05;
+    if (bass > .22 && bass > vj.avg * 1.4 && now - vj.lastBeat > 220) { vj.beats++; vj.lastBeat = now; }
+    const listening = app.audio.kind !== 'off' && now - vj.lastBeat < 4000;
+    if ((listening && vj.beats >= 16) || (!listening && now - vj.lastSwitch > 9000)) {
+      const pool = PRESETS.filter(p => p.name !== 'Raw' && p.name !== app.activePreset);
+      app.applyPreset(pool[Math.floor(Math.random() * pool.length)], { quiet: true });
+      vj.beats = 0; vj.lastSwitch = now;
+    }
+  }
+  const vjBtn = $('#autoVJ');
+  vjBtn.onclick = () => {
+    vj.on = !vj.on; vjBtn.setAttribute('aria-pressed', vj.on);
+    vj.beats = 0; vj.lastSwitch = performance.now();
+    ui.toast(vj.on ? (app.audio.kind === 'off' ? 'Auto VJ on. New look every 9 seconds, or every 16 beats with audio.' : 'Auto VJ on. New look every 16 beats.') : 'Auto VJ off');
+  };
+
+  /* ---------- MIDI ---------- */
+  let midiCommit;
+  app.midi = new Midi({
+    onValue(target, v) {
+      const [id, k] = target.split('.'), p = OPMAP[id]?.params.find(x => x.k === k);
+      if (!p) return;
+      let val = p.min + v * (p.max - p.min); if (p.step >= 1) val = Math.round(val);
+      if (!app.state.ops[id].on && !OPMAP[id].always) { app.state.ops[id].on = true; ui.renderNetwork(); }
+      app.setParam(id, k, val); ui.syncParam(id, k);
+      clearTimeout(midiCommit); midiCommit = setTimeout(() => app.commit(), 500);
+    },
+    onLearned(target, key) {
+      const [id, k] = target.split('.'), p = OPMAP[id].params.find(x => x.k === k);
+      ui.toast(`${app.midi.labelFor(target)} now controls ${OPMAP[id].label} › ${p.label}`);
+      ui.renderInspector();
+    },
+  });
+  const midiBtn = $('#midiBtn'), appRoot = $('#app');
+  const setLearning = on => {
+    app.midi.learning = on; app.midi.armed = null;
+    midiBtn.setAttribute('aria-pressed', on); appRoot.classList.toggle('midi-learn', on);
+    ui.renderInspector();
+  };
+  midiBtn.onclick = async () => {
+    if (app.midi.learning) { setLearning(false); ui.toast('MIDI learn off. Your mappings are saved.'); return; }
+    try {
+      const devices = await app.midi.enable();
+      setLearning(true);
+      ui.toast(devices.length ? `MIDI learn: click a slider, then move a knob on ${devices[0]}.` : 'MIDI learn on, but no device found. Plug in a controller.');
+    } catch (e) { ui.toast(app.midi.supported ? 'MIDI access was blocked. Allow MIDI devices for this site in your browser settings, then try again.' : e.message, true); }
+  };
+
+  /* ---------- output window ---------- */
+  $('#outputBtn').onclick = () => {
+    const w = window.open('', 'lumen-rack-output', 'popup,width=1280,height=720');
+    if (!w) { ui.toast('The output window was blocked. Allow pop-ups for this site.', true); return; }
+    const d = w.document;
+    d.title = 'Lumen Rack output';
+    d.body.innerHTML = '';
+    d.body.style.cssText = 'margin:0;background:#000;height:100vh;overflow:hidden;cursor:none';
+    const v = d.createElement('video');
+    v.muted = true; v.autoplay = true; v.playsInline = true;
+    v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block';
+    v.srcObject = canvas.captureStream(60);
+    d.body.appendChild(v); v.play().catch(() => {});
+    const tip = d.createElement('div');
+    tip.textContent = 'Double-click for fullscreen';
+    tip.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);font:13px system-ui;color:#fff;background:rgba(0,0,0,.6);padding:8px 14px;border-radius:999px;transition:opacity .6s';
+    d.body.appendChild(tip); setTimeout(() => (tip.style.opacity = 0), 2500);
+    d.body.ondblclick = () => (d.fullscreenElement ? d.exitFullscreen() : d.documentElement.requestFullscreen().catch(() => {}));
+    ui.toast('Output window open. Drag it to your projector and double-click it for fullscreen.');
+  };
+
+  function restore(s) { morph = null; app.state = sanitize(s); app.activePreset = null; persist(); ui.renderAll(); refreshUndo(); }
 
   /* ---------- modulation ---------- */
   function evaluate(t) {
@@ -129,7 +227,7 @@ function start() {
   app.sources = new Sources(renderer, {
     onChange(cur) {
       if (app.audio.kind === 'video') app.audio.detach();
-      app.faces.reset();
+      app.faces.reset(); app.segmenter.reset(); renderer.clearMask(); motion = null;
       if (cur.kind === 'camera' && !app.state.ops.faceblur.on) {
         app.state.ops.faceblur.on = true; app.commit(); ui.renderNetwork();
         if (app.selected === 'faceblur') ui.renderInspector();
@@ -233,6 +331,8 @@ function start() {
       s.mods[pick(cands)] = { src: Math.random() < .6 ? 'lfo' : pick(['bass', 'level']), rate: r(.05, .6), depth: r(.1, .35) * (Math.random() < .5 ? -1 : 1) };
     }
     s.ops.faceblur = clone(app.state.ops.faceblur);
+    s.ops.segment = clone(app.state.ops.segment);
+    morph = null;
     app.state = sanitize(s); app.activePreset = null; app.commit(); ui.renderAll();
     ui.toast('Randomized. Press Ctrl+Z to undo.');
   }
@@ -313,19 +413,23 @@ function start() {
 
   /* ---------- pointer ---------- */
   let mouse = [9, 9], mTarget = 0, mForce = 0, down = false;
+  const pointerDrives = () => app.state.ops.touch.driver === 0;
   canvas.addEventListener('pointermove', e => {
+    if (!pointerDrives()) return;
     const r = canvas.getBoundingClientRect(), aspect = r.width / r.height;
     mouse = [((e.clientX - r.left) / r.width * 2 - 1) * aspect, -((e.clientY - r.top) / r.height * 2 - 1)];
     mTarget = down ? 2.2 : 1;
   });
-  canvas.addEventListener('pointerdown', e => { down = true; mTarget = 2.2; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointerup', () => { down = false; mTarget = 1; });
-  canvas.addEventListener('pointerleave', () => { if (!down) mTarget = 0; });
-  canvas.addEventListener('pointercancel', () => { down = false; mTarget = 0; });
+  canvas.addEventListener('pointerdown', e => { if (!pointerDrives()) return; down = true; mTarget = 2.2; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointerup', () => { if (!pointerDrives()) return; down = false; mTarget = 1; });
+  canvas.addEventListener('pointerleave', () => { if (pointerDrives() && !down) mTarget = 0; });
+  canvas.addEventListener('pointercancel', () => { if (!pointerDrives()) return; down = false; mTarget = 0; });
+  let motion = null;
+  const toWorld = (u, v) => { const f = renderer.fit(); return [(u * 2 - 1) * f[0], (v * 2 - 1) * f[1]]; };
 
   /* ---------- keyboard ---------- */
   const typing = t => (t.tagName === 'INPUT' && t.type !== 'range') || t.tagName === 'TEXTAREA' || t.isContentEditable;
-  const seq = () => ['faceblur', 'particles', 'touch', ...app.state.order, 'out'];
+  const seq = () => ['faceblur', 'segment', 'particles', 'touch', ...app.state.order, 'out'];
   addEventListener('keydown', e => {
     if (typing(e.target)) return;
     const k = e.key, mod = e.ctrlKey || e.metaKey;
@@ -346,7 +450,7 @@ function start() {
       case '[': case ']': { const q = seq(), i = q.indexOf(app.selected); app.select(q[Math.max(0, Math.min(q.length - 1, i + (k === '[' ? -1 : 1)))]); break; }
       case '?': openHelp(); break;
       case '\\': if (!e.repeat) setCompare(true); break;
-      case 'Escape': if (appEl.classList.contains('immersive')) toggleImmersive(); else $('#saveForm').hidden = true; break;
+      case 'Escape': if (app.midi.learning) setLearning(false); else if (appEl.classList.contains('immersive')) toggleImmersive(); else $('#saveForm').hidden = true; break;
       default: if (/^[1-9]$/.test(k) && PRESETS[+k - 1]) app.applyPreset(PRESETS[+k - 1]);
     }
   });
@@ -365,27 +469,51 @@ function start() {
     const dt = Math.min(.05, (now - last) / 1000); last = now; n++;
     const t = now / 1000;
     app.audio.update(dt);
+    stepVJ(now);
+    stepMorph(now);
+    app.sources.tick();
+    const S0 = app.state, kind = app.sources.cur?.kind, live = kind === 'video' || kind === 'camera';
+    const needMotion = live && ((S0.ops.touch.on && S0.ops.touch.driver === 1) || Object.values(S0.mods).some(m => m.src === 'motion'));
+    if (needMotion && n % 2 === 0) motion = renderer.motion(motion);
+    const lvl = needMotion && motion ? motion.level : 0;
+    app.audio.bands.motion = (app.audio.bands.motion || 0) + (lvl - (app.audio.bands.motion || 0)) * Math.min(1, dt * (lvl > (app.audio.bands.motion || 0) ? 14 : 4));
     evaluate(t);
     const E = app.E, q = E.out.quality;
     const scale = q === 0 ? autoScale : [1, 1, .75, .5][q];
     const dpr = Math.min(devicePixelRatio || 1, 2) * scale;
     const w = Math.max(2, Math.round(canvas.clientWidth * dpr)), h = Math.max(2, Math.round(canvas.clientHeight * dpr));
     renderer.resize(w, h);
-    app.sources.tick();
 
     flowT += dt * E.particles.speed;
     rot += dt * E.particles.orbit * .6;
     for (const id in acc) for (const k in acc[id]) acc[id][k] += dt * E[id][k] * (id === 'kaleido' ? .8 : 1);
+    const faces = { list: [], cover: false };
+    const faceTouch = E.touch.on && E.touch.driver === 2;
+    if ((E.faceblur.on || faceTouch) && app.sources.cur && kind !== 'sample') {
+      const F = app.faces;
+      if (F.status === 'idle') F.load().catch(() => ui.toast(E.faceblur.on ? 'Face detection couldn’t start here, so the whole frame is blurred instead.' : 'Face detection couldn’t start in this browser.', true));
+      if (F.ready) faces.list = F.update(app.sources.cur, now, { still: kind === 'photo', group: E.faceblur.range === 1 });
+      else if (E.faceblur.on) faces.cover = true;
+    }
+    const faceList = faces.list;
+    if (!E.faceblur.on) faces.list = [];
+
+    // touch drivers
+    if (E.touch.driver === 1) {
+      const lv = app.audio.bands.motion;
+      if (motion) { const [x, y] = toWorld(motion.x, motion.y); mouse = [mouse[0] + (x - mouse[0]) * .25, mouse[1] + (y - mouse[1]) * .25]; }
+      mTarget = lv > .04 ? 1 + lv * 2 : 0;
+    } else if (E.touch.driver === 2) {
+      const f = faceList.reduce((a, b) => (!a || b.rx > a.rx ? b : a), null);
+      if (f) { const [x, y] = toWorld(f.cx, f.cy); mouse = [mouse[0] + (x - mouse[0]) * .3, mouse[1] + (y - mouse[1]) * .3]; }
+      mTarget = f ? 1.6 : 0;
+    }
     mForce += ((E.touch.on ? mTarget : 0) - mForce) * Math.min(1, dt * 8);
 
-    const faces = { list: [], cover: false };
-    if (E.faceblur.on && app.sources.cur && app.sources.cur.kind !== 'sample') {
-      const F = app.faces;
-      if (F.status === 'idle') F.load().catch(() => ui.toast('Face detection couldn’t start here, so the whole frame is blurred instead.', true));
-      if (F.ready) {
-        const kind = app.sources.cur.kind;
-        faces.list = F.update(app.sources.cur, now, { still: kind === 'photo' || kind === 'sample', group: E.faceblur.range === 1 });
-      } else faces.cover = true;
+    if (E.segment.on && app.sources.cur && kind !== 'sample') {
+      const G = app.segmenter;
+      if (G.status === 'idle') G.load().catch(() => ui.toast('Person detection couldn’t start in this browser.', true));
+      if (G.ready && G.update(app.sources.cur, now, kind === 'photo')) renderer.setMask(G.mask, G.w, G.h);
     }
     const count = renderer.render({ E, order: app.state.order, acc, mouse, mouseForce: mForce, time: t, flowT, rot, dpr, compare, faces });
 
@@ -404,11 +532,13 @@ function start() {
         else low = high = 0;
       }
     }
-    const kind = app.sources.cur?.kind;
+
     if ((kind === 'video' || kind === 'camera') && n % 30 === 0) ui.drawThumb();
     ui.tick(n);
     requestAnimationFrame(frame);
   }
+
+  if (import.meta.env.DEV) window.__lumen = app;   // handle for local testing only
 
   /* ---------- boot ---------- */
   app.sources.sample();

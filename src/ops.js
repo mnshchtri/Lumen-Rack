@@ -16,7 +16,7 @@ export const PALS = [
 ];
 
 export const MOD_SOURCES = [
-  ['lfo', 'LFO'], ['bass', 'Bass'], ['mid', 'Mid'], ['high', 'High'], ['level', 'Level'],
+  ['lfo', 'LFO'], ['bass', 'Bass'], ['mid', 'Mid'], ['high', 'High'], ['level', 'Level'], ['motion', 'Motion'],
 ];
 
 export const OPS = [
@@ -29,6 +29,16 @@ export const OPS = [
       R('feather', 'Soft edge (blur)', 0, 1, .01, .3),
       E('range', 'Look for', ['Close-up faces', 'Groups & distant faces']),
       E('outline', 'Outline', ['Hidden', 'Shown']),
+    ] },
+  { id: 'segment', node: 'segment1', fam: 'TOP', stage: 'source', label: 'Person cutout', on: false,
+    desc: 'Separates people from the background on your device. With Particles on and the background removed, only the person turns into particles.',
+    params: [
+      E('mode', 'Background', ['Remove', 'Blur', 'Color', 'Keep only background']),
+      R('threshold', 'Threshold', .1, .9, .01, .5),
+      R('softness', 'Edge softness', 0, .6, .01, .2),
+      R('blur', 'Background blur', .2, 2, .01, 1),
+      R('hue', 'Color', 0, 360, 1, 260, '°'),
+      R('rim', 'Rim light', 0, 1, .01, 0),
     ] },
   { id: 'particles', node: 'particlesGPU1', fam: 'SOP', stage: 'scene', label: 'Particles', on: true,
     desc: 'Every sampled pixel becomes a glowing point. Brighter pixels float toward you.',
@@ -46,8 +56,9 @@ export const OPS = [
       R('glow', 'Glow', .1, 1.5, .01, .7),
     ] },
   { id: 'touch', node: 'mousein1', fam: 'CHOP', stage: 'chop', label: 'Touch', on: true,
-    desc: 'Your pointer bends the image. Hold the button down to push harder.',
-    params: [E('mode', 'Mode', ['Push', 'Pull', 'Swirl']), R('force', 'Force', 0, 2, .01, 1), R('radius', 'Radius', .1, 1, .01, .4)] },
+    desc: 'Bends the image around a point: your pointer, wherever there is movement on camera, or a face.',
+    params: [E('driver', 'Driven by', ['Pointer', 'Motion', 'Face']), E('mode', 'Mode', ['Push', 'Pull', 'Swirl']),
+      R('force', 'Force', 0, 2, .01, 1), R('radius', 'Radius', .1, 1, .01, .4)] },
 
   { id: 'displace', node: 'displace1', fam: 'TOP', stage: 'post', label: 'Displace', on: false,
     desc: 'Warps the frame through drifting noise.',
@@ -122,5 +133,9 @@ export const PRESETS = [
       'bloom.amount': { src: 'level', rate: .5, depth: .5 },
       'particles.size': { src: 'lfo', rate: .4, depth: .08 },
     } } },
+  { name: 'Spotlight', sw: ['#ff9de2', '#2b0a3d'], s: { ops: {
+    segment: { on: 1, mode: 0, rim: .8, hue: 300 }, particles: { density: 300, size: 1.8, cutoff: .02, turb: .3, orbit: .2 },
+    touch: { driver: 1 }, feedback: { amount: .86, zoom: .6 }, bloom: { amount: .7 } },
+    mods: { 'particles.explode': { src: 'motion', rate: .5, depth: .5 } } } },
   { name: 'Raw', sw: ['#5c5a69', '#18181f'], s: { ops: { particles: { on: 0 }, touch: { on: 0 }, feedback: { on: 0 }, bloom: { on: 0 } } } },
 ];
