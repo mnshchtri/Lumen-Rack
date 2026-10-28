@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lumen Rack</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><h1>Lumen<span>/</span>Rack</h1><small>realtime operator rack · WebGL2</small></div>
+    <div class="actions">
+      <label class="btn primary" for="file">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 11V2M4.5 5.5 8 2l3.5 3.5M2.5 10.5v3h11v-3"/></svg>
+        Load photo or video
+      </label>
+      <input type="file" id="file" accept="image/*,video/*">
+      <button class="btn" id="rand" type="button">Randomize</button>
+      <button class="btn" id="sample" type="button">Sample image</button>
+      <button class="btn" id="snap" type="button">Snapshot</button>
+      <button class="btn rec" id="rec" type="button" aria-pressed="false"><i></i><span>Record</span></button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="viewport" id="vp">
+      <canvas id="gl" aria-label="Effect output"></canvas>
+      <div class="hud"><span class="src" id="srcInfo">sample · 1200×800</span><span id="stats">— fps</span></div>
+      <div class="hint" id="hint">Move over the image to push it · hold to push harder · drop a file anywhere</div>
+      <div class="vp-tools">
+        <button class="icon-btn" id="playBtn" type="button" hidden></button>
+        <button class="icon-btn" id="fsBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>
+        </button>
+      </div>
+      <div class="drop" id="drop" hidden>Drop to load</div>
+    </div>
+    <div class="chain-wrap"><div class="chain" id="chain"></div></div>
+  </main>
+
+  <aside class="panel">
+    <div class="presets">
+      <div class="label">Presets</div>
+      <div class="chips" id="presets"></div>
+    </div>
+    <div class="ops" id="ops"></div>
+    <p class="foot">Everything runs on your GPU in this tab. Files you load never leave your device.</p>
+  </aside>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

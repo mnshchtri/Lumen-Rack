@@ -1,0 +1,15 @@
+{
+  "name": "lumen-rack",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Realtime WebGL2 effect rack for photos and videos: GPU particles, feedback, kaleidoscope, glitch and more.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
