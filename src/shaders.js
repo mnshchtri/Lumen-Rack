@@ -83,39 +83,62 @@ void main(){
 }`;
 
 // Face blur runs on the source texture (y up) before the scene, so every later effect sees hidden faces.
+// Face blur runs on the source texture (y up) before the scene, so every later effect sees hidden faces.
+// Mode 0 = mosaic (whole square tiles), 1 = blur, 2 = solid.
 export const FS_FACE = `#version 300 es
 precision highp float;
 in vec2 vUv; out vec4 o;
 uniform sampler2D uSrc; uniform vec2 uSrcSize; uniform vec4 uFaces[16]; uniform int uCount;
 uniform float u_mode, u_strength, u_padding, u_feather, u_outline, uCover;
-void main(){
-  vec3 base=textureLod(uSrc,vUv,0.).rgb;
-  float m=uCover, ring=0., big=0.;
+
+// soft mask, outline ring and size (px) of the largest face covering p
+vec3 faceMask(vec2 p, out float ring){
+  float m=0., big=0.; ring=0.;
   for(int i=0;i<16;i++){
     if(i>=uCount) break;
     vec4 f=uFaces[i]; vec2 r=f.zw*vec2(1.+u_padding, 1.+u_padding*1.25);
-    vec2 d=(vUv-f.xy)/r; d.y=d.y>0. ? d.y*.85 : d.y;   // a little extra room above for hair
+    vec2 d=(p-f.xy)/r; d.y=d.y>0. ? d.y*.85 : d.y;   // extra room above for hair
     float e=length(d);
-    m=max(m, 1.-smoothstep(1.-u_feather*.8-.002, 1., e));
+    float mm=1.-smoothstep(1.-u_feather*.8-.002, 1., e);
+    if(mm>0.) big=max(big, max(r.x*uSrcSize.x, r.y*uSrcSize.y));
+    m=max(m, mm);
     ring=max(ring, 1.-smoothstep(.0, .025, abs(e-1.)));
-    big=max(big, max(r.x*uSrcSize.x, r.y*uSrcSize.y));
   }
-  if(uCover>0.) big=max(uSrcSize.x,uSrcSize.y)*.35;
+  return vec3(m, big, 0.);
+}
+
+void main(){
+  vec3 base=textureLod(uSrc,vUv,0.).rgb;
+  float ring; vec3 fm=faceMask(vUv, ring);
+  float m=max(fm.x, uCover);
+  float big=uCover>0. ? max(uSrcSize.x,uSrcSize.y)*.35 : fm.y;
   vec3 col=base;
-  if(m>0.){
+
+  if(u_mode<.5){
+    // Mosaic: one tile size for the frame (from the largest face); a tile is drawn whole if its centre is on a face.
+    float bigAll=0.;
+    for(int i=0;i<16;i++){ if(i>=uCount) break; vec2 r=uFaces[i].zw*(1.+u_padding); bigAll=max(bigAll, max(r.x*uSrcSize.x, r.y*uSrcSize.y)); }
+    if(uCover>0.) bigAll=max(uSrcSize.x,uSrcSize.y)*.3;
+    if(bigAll>0.){
+      float cell=max(6., bigAll*u_strength*.24);
+      vec2 g=uSrcSize/cell; vec2 q=(floor(vUv*g)+.5)/g;
+      float r2; float mq=uCover>0. ? 1. : faceMask(q, r2).x;
+      if(mq>.35){
+        vec3 tile=textureLod(uSrc, q, log2(cell)).rgb;
+        vec2 inCell=fract(vUv*g);
+        float edge=step(.06, min(min(inCell.x,inCell.y), min(1.-inCell.x,1.-inCell.y)));
+        col=tile*mix(.86, 1., edge);   // faint grout lines between tiles
+      }
+    }
+  } else if(m>0.){
     vec3 fx;
-    if(u_mode<.5){
+    if(u_mode<1.5){
       float R=max(2., big*u_strength*.32); float lod=max(0., log2(R/5.));
       vec3 s=vec3(0);
       for(int k=0;k<32;k++){ float a=float(k)*2.39996; float rr=sqrt((float(k)+.5)/32.)*R;
         s+=textureLod(uSrc, vUv+vec2(cos(a),sin(a))*rr/uSrcSize, lod).rgb; }
       fx=s/32.;
-    } else if(u_mode<1.5){
-      float cell=max(4., big*u_strength*.22); vec2 g=uSrcSize/cell; vec2 q=(floor(vUv*g)+.5)/g;
-      fx=textureLod(uSrc, q, max(0., log2(cell)-1.)).rgb;
-    } else {
-      fx=vec3(.05,.05,.06);
-    }
+    } else fx=vec3(.05,.05,.06);
     col=mix(base, fx, m);
   }
   if(u_outline>.5 && uCover<=0.) col=mix(col, vec3(1.,.71,.28), ring*.9);

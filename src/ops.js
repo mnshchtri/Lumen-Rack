@@ -21,12 +21,12 @@ export const MOD_SOURCES = [
 
 export const OPS = [
   { id: 'faceblur', node: 'faceblur1', fam: 'TOP', stage: 'source', label: 'Face blur', on: false,
-    desc: 'Finds faces on your device and hides them before any other effect runs, so particles and trails can’t reveal them either. Nothing is uploaded.',
+    desc: 'Finds faces on your device and covers them with a mosaic before any other effect runs, so particles and trails can’t reveal them either. Nothing is uploaded.',
     params: [
-      E('mode', 'Style', ['Blur', 'Pixelate', 'Solid']),
+      E('mode', 'Style', ['Mosaic', 'Blur', 'Solid']),
       R('strength', 'Strength', .3, 2, .01, 1),
       R('padding', 'Padding', 0, 1, .01, .35),
-      R('feather', 'Soft edge', 0, 1, .01, .3),
+      R('feather', 'Soft edge (blur)', 0, 1, .01, .3),
       E('range', 'Look for', ['Close-up faces', 'Groups & distant faces']),
       E('outline', 'Outline', ['Hidden', 'Shown']),
     ] },

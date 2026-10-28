@@ -6,7 +6,7 @@ Realtime GPU effects for your photos and videos, in the browser. Load an image, 
 
 **Sources**: photos, videos (with scrubbing), the camera, or the built-in sample. Drag and drop anywhere.
 
-**Face blur**: finds faces with MediaPipe's BlazeFace detector, entirely on your device, and hides them (blur, pixelate or solid) on the source before any other effect runs, so particles, trails and recordings never show a face. It turns on automatically when you start the camera, stays on when you switch presets or randomize, and blurs the whole frame until the model is ready. "Groups & distant faces" also scans four zoomed tiles to catch smaller faces.
+**Face blur**: finds faces with MediaPipe's BlazeFace detector, entirely on your device, and covers them with a mosaic (or blur, or a solid fill) on the source before any other effect runs, so particles, trails and recordings never show a face. It turns on automatically when you start the camera, stays on when you switch presets or randomize, and blurs the whole frame until the model is ready. "Groups & distant faces" also scans four zoomed tiles to catch smaller faces.
 
 **Operators**
 | Family | Operator | What it does |
