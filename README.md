@@ -20,7 +20,7 @@ Realtime GPU effects for your photos and videos, in the browser. Load an image, 
 
 **Animation**: press the wave icon beside any slider to modulate it with an LFO, or with the bass, mid, high or overall level of your mic, a song file or the video's own sound.
 
-**Workflow**: 9 presets plus your own saved ones, randomize, undo/redo, hold-to-compare with the original, share links that encode the whole look, auto-saved session, hide-panels mode, keyboard shortcuts (press `?`).
+**Workflow**: 9 presets plus your own saved ones, randomize, undo/redo, hold-to-compare with the original, share links that encode the whole look, auto-saved session, hide-panels mode, keyboard shortcuts (press `?`). A Face blur switch sits on the viewport (shortcut `P`).
 
 **Export**: PNG snapshots and video recording (MP4 where supported, otherwise WebM), including the song or video audio.
 

@@ -20,6 +20,7 @@ const P = {
   play: '<path d="M5 3.2v9.6L13 8z" fill="currentColor" stroke="none"/>',
   pause: '<rect x="4" y="3" width="3" height="10" rx=".6" fill="currentColor" stroke="none"/><rect x="9" y="3" width="3" height="10" rx=".6" fill="currentColor" stroke="none"/>',
   reset: '<path d="M2.6 8a5.4 5.4 0 1 0 1.7-3.9"/><path d="M2.6 2.6v3h3"/>',
+  face: '<circle cx="8" cy="8" r="6.2"/><circle cx="6" cy="6.8" r=".6" fill="currentColor"/><circle cx="10" cy="6.8" r=".6" fill="currentColor"/><path d="M5.6 10.1c.7.8 1.5 1.1 2.4 1.1s1.7-.3 2.4-1.1"/>',
   left: '<path d="M10 3.5 5.5 8l4.5 4.5"/>',
   right: '<path d="M6 3.5 10.5 8 6 12.5"/>',
 };
@@ -318,6 +319,7 @@ export function createUI(app) {
       r.liveEl.style.setProperty('--live', pct(r.p, v) + '%');
       r.out.textContent = fmt(r.p, v);
     }
+    if (n % 8 === 0) syncFaceToggle();
     if (n % 8 === 0) $('.thumb').classList.toggle('private', !!app.state.ops.faceblur.on && app.sources.cur?.kind !== 'sample');
     const st = insp.querySelector('#opStatus');
     if (st && n % 8 === 0) { const txt = app.state.ops.faceblur.on ? app.faces.statusText() : 'Off. Turn it on to hide faces.'; if (st.textContent !== txt) st.textContent = txt; st.dataset.state = app.faces.status; }
@@ -334,6 +336,12 @@ export function createUI(app) {
       }
     }
   }
+  function syncFaceToggle() {
+    const b = $('#faceToggle'), on = !!app.state.ops.faceblur.on;
+    if (b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', on);
+    const f = app.faces, txt = !on ? 'Face blur' : f.status === 'loading' ? 'Face blur · loading' : f.ready ? `Face blur · ${f.tracks.length}` : 'Face blur';
+    const lab = b.querySelector('.ft-label'); if (lab.textContent !== txt) lab.textContent = txt;
+  }
   function setRecording(on) {
     const b = $('#rec'); b.setAttribute('aria-pressed', on);
     b.querySelector('span').textContent = on ? '0:00' : 'Record';
@@ -348,7 +356,7 @@ export function createUI(app) {
     const rows = [
       ['Upload a photo, video or song', ['U']], ['Play or pause the video', ['Space']], ['Randomize', ['R']],
       ['Built-in presets', ['1', '–', '9']], ['Save a snapshot', ['S']], ['Start or stop recording', ['V']],
-      ['Hold to compare with the original', ['\\']], ['Undo', [C, 'Z']], ['Redo', [C, 'Shift', 'Z']],
+      ['Hold to compare with the original', ['\\']], ['Face blur on or off', ['P']], ['Undo', [C, 'Z']], ['Redo', [C, 'Shift', 'Z']],
       ['Previous or next node', ['[', ']']], ['Bypass the selected node', ['B']], ['Move an effect earlier or later', ['Alt', '←', '→']],
       ['Hide or show panels', ['H']], ['Fullscreen', ['F']], ['Reset a slider', ['Double-click']],
     ];
@@ -359,5 +367,5 @@ export function createUI(app) {
     renderNetwork(); renderInspector(); renderPresets(); renderAudio();
   }
 
-  return { renderAll, renderNetwork, renderInspector, renderPresets, renderSource, renderAudio, renderHelp, drawThumb, setPlayIcon, tick, toast, setRecording, focusNode };
+  return { syncFaceToggle, renderAll, renderNetwork, renderInspector, renderPresets, renderSource, renderAudio, renderHelp, drawThumb, setPlayIcon, tick, toast, setRecording, focusNode };
 }

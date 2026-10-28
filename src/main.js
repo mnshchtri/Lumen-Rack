@@ -255,6 +255,13 @@ function start() {
   };
 
   /* ---------- toolbar ---------- */
+  function toggleFaceBlur() {
+    app.toggleOp('faceblur');
+    const on = app.state.ops.faceblur.on;
+    ui.syncFaceToggle();
+    ui.toast(on ? 'Face blur on' : 'Face blur off');
+  }
+  $('#faceToggle').onclick = toggleFaceBlur;
   $('#rand').onclick = randomize;
   $('#undo').onclick = () => app.undo();
   $('#redo').onclick = () => app.redo();
@@ -335,6 +342,7 @@ function start() {
       case 'f': fullscreen(); break;
       case 'h': toggleImmersive(); break;
       case 'b': app.toggleOp(app.selected); break;
+      case 'p': toggleFaceBlur(); break;
       case '[': case ']': { const q = seq(), i = q.indexOf(app.selected); app.select(q[Math.max(0, Math.min(q.length - 1, i + (k === '[' ? -1 : 1)))]); break; }
       case '?': openHelp(); break;
       case '\\': if (!e.repeat) setCompare(true); break;
@@ -371,7 +379,7 @@ function start() {
     mForce += ((E.touch.on ? mTarget : 0) - mForce) * Math.min(1, dt * 8);
 
     const faces = { list: [], cover: false };
-    if (E.faceblur.on && app.sources.cur) {
+    if (E.faceblur.on && app.sources.cur && app.sources.cur.kind !== 'sample') {
       const F = app.faces;
       if (F.status === 'idle') F.load().catch(() => ui.toast('Face detection couldn’t start here, so the whole frame is blurred instead.', true));
       if (F.ready) {

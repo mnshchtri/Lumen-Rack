@@ -102,7 +102,12 @@
           <button class="tb sm ghost" type="button" data-act="dismiss">Got it</button>
         </div>
       </div>
-      <button class="exit-imm" id="exitImm" type="button" hidden>Show panels <kbd>H</kbd></button>
+      <div class="vp-actions">
+        <button class="exit-imm" id="exitImm" type="button" hidden>Show panels <kbd>H</kbd></button>
+        <button class="face-toggle" id="faceToggle" type="button" aria-pressed="false" title="Turn face blur on or off (P)">
+          <span class="ft-ico" data-icon="face"></span><span class="ft-label">Face blur</span><i class="ft-switch" aria-hidden="true"></i>
+        </button>
+      </div>
       <div class="drop" id="drop" hidden><div><strong>Drop to load</strong><span>Photo, video or song</span></div></div>
       <div class="toasts" id="toasts" aria-live="polite"></div>
       <div class="nogl" id="nogl" hidden>
