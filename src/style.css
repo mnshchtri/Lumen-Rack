@@ -350,3 +350,16 @@ input[type=range]:hover::-webkit-slider-thumb { background: #fff; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* face blur status */
+.insp-status { font-size: 12.5px; padding: 8px 10px; border-radius: 7px; background: var(--raise); color: var(--fg); display: flex; gap: 8px; align-items: center; }
+.insp-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--chop); flex: none; }
+.insp-status[data-state="loading"]::before { background: var(--accent); animation: blink 1s steps(2) infinite; }
+.insp-status[data-state="error"]::before { background: var(--rec); }
+.insp-status[data-state="idle"]::before { background: var(--faint); }
+.thumb { position: relative; }
+.thumb.private canvas { filter: blur(9px) saturate(.85); transform: scale(1.12); }
+.thumb.private::after {
+  content: "Faces hidden"; position: absolute; left: 8px; bottom: 8px; font: 500 10.5px/1 var(--f-mono);
+  padding: 4px 7px; border-radius: 5px; background: rgba(9, 9, 12, .7); color: var(--fg);
+}

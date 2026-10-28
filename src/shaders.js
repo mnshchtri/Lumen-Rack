@@ -82,6 +82,46 @@ void main(){
   o=vec4(c+(g-.5)*.08*u_grain,1.);
 }`;
 
+// Face blur runs on the source texture (y up) before the scene, so every later effect sees hidden faces.
+export const FS_FACE = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uSrc; uniform vec2 uSrcSize; uniform vec4 uFaces[16]; uniform int uCount;
+uniform float u_mode, u_strength, u_padding, u_feather, u_outline, uCover;
+void main(){
+  vec3 base=textureLod(uSrc,vUv,0.).rgb;
+  float m=uCover, ring=0., big=0.;
+  for(int i=0;i<16;i++){
+    if(i>=uCount) break;
+    vec4 f=uFaces[i]; vec2 r=f.zw*vec2(1.+u_padding, 1.+u_padding*1.25);
+    vec2 d=(vUv-f.xy)/r; d.y=d.y>0. ? d.y*.85 : d.y;   // a little extra room above for hair
+    float e=length(d);
+    m=max(m, 1.-smoothstep(1.-u_feather*.8-.002, 1., e));
+    ring=max(ring, 1.-smoothstep(.0, .025, abs(e-1.)));
+    big=max(big, max(r.x*uSrcSize.x, r.y*uSrcSize.y));
+  }
+  if(uCover>0.) big=max(uSrcSize.x,uSrcSize.y)*.35;
+  vec3 col=base;
+  if(m>0.){
+    vec3 fx;
+    if(u_mode<.5){
+      float R=max(2., big*u_strength*.32); float lod=max(0., log2(R/5.));
+      vec3 s=vec3(0);
+      for(int k=0;k<32;k++){ float a=float(k)*2.39996; float rr=sqrt((float(k)+.5)/32.)*R;
+        s+=textureLod(uSrc, vUv+vec2(cos(a),sin(a))*rr/uSrcSize, lod).rgb; }
+      fx=s/32.;
+    } else if(u_mode<1.5){
+      float cell=max(4., big*u_strength*.22); vec2 g=uSrcSize/cell; vec2 q=(floor(vUv*g)+.5)/g;
+      fx=textureLod(uSrc, q, max(0., log2(cell)-1.)).rgb;
+    } else {
+      fx=vec3(.05,.05,.06);
+    }
+    col=mix(base, fx, m);
+  }
+  if(u_outline>.5 && uCover<=0.) col=mix(col, vec3(1.,.71,.28), ring*.9);
+  o=vec4(col,1.);
+}`;
+
 const HEAD = `#version 300 es
 precision highp float;
 in vec2 vUv; out vec4 o;

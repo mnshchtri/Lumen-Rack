@@ -62,13 +62,18 @@ export function createUI(app) {
   /* ---------- network ---------- */
   function summary(op) {
     const e = app.E[op.id];
+    if (op.id === 'faceblur') {
+      if (!e?.on) return 'off';
+      const f = app.faces; if (f.status === 'loading') return 'loading…'; if (f.status === 'error') return 'full frame';
+      return f.ready ? `${f.tracks.length} face${f.tracks.length === 1 ? '' : 's'}` : 'starting';
+    }
     const p = op.params.find(x => x.type === 'range') || op.params[0];
     if (!p || !e) return '';
     return p.type === 'range' ? `${p.k} ${fmt(p, e[p.k])}` : fmt(p, e[p.k]);
   }
   function renderNetwork() {
     net.innerHTML = ''; nodeVals = {};
-    ['source', 'particles', 'touch', ...app.state.order, 'out'].forEach((id, i) => {
+    ['source', 'faceblur', 'particles', 'touch', ...app.state.order, 'out'].forEach((id, i) => {
       if (i) net.appendChild(el('span', 'wire'));
       net.appendChild(makeNode(id));
     });
@@ -144,6 +149,7 @@ export function createUI(app) {
       <div class="insp-title"><h2>${op.label}</h2>${op.always ? '' : `<button class="switch" type="button" aria-pressed="${st.on}" aria-label="${op.label} on" title="On or bypassed (B)"></button>`}</div>
       <div class="insp-sub"><span class="famtag">${op.fam}</span><code>${op.node}</code>${op.stage === 'post' ? `<span>· step ${i + 1} of ${app.state.order.length}</span>` : ''}</div>
       <p class="insp-desc">${op.desc}</p>
+      ${op.id === 'faceblur' ? '<p class="insp-status" id="opStatus" role="status"></p>' : ''}
       <div class="insp-tools">
         <button class="tb sm" type="button" data-act="reset" data-icon="reset"><span>Reset</span></button>
         ${op.stage === 'post' ? `<button class="tb sm" type="button" data-act="left" data-icon="left" title="Move earlier (Alt+←)" ${i <= 0 ? 'disabled' : ''}><span>Earlier</span></button>
@@ -312,6 +318,9 @@ export function createUI(app) {
       r.liveEl.style.setProperty('--live', pct(r.p, v) + '%');
       r.out.textContent = fmt(r.p, v);
     }
+    if (n % 8 === 0) $('.thumb').classList.toggle('private', !!app.state.ops.faceblur.on && app.sources.cur?.kind !== 'sample');
+    const st = insp.querySelector('#opStatus');
+    if (st && n % 8 === 0) { const txt = app.state.ops.faceblur.on ? app.faces.statusText() : 'Off. Turn it on to hide faces.'; if (st.textContent !== txt) st.textContent = txt; st.dataset.state = app.faces.status; }
     if (n % 4 === 0) for (const id in nodeVals) {
       const op = OPMAP[id]; nodeVals[id].textContent = summary(op);
       nodeVals[id].classList.toggle('live', Object.keys(app.state.mods).some(k => k.startsWith(id + '.')));

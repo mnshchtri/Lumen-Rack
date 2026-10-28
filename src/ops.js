@@ -20,6 +20,16 @@ export const MOD_SOURCES = [
 ];
 
 export const OPS = [
+  { id: 'faceblur', node: 'faceblur1', fam: 'TOP', stage: 'source', label: 'Face blur', on: false,
+    desc: 'Finds faces on your device and hides them before any other effect runs, so particles and trails can’t reveal them either. Nothing is uploaded.',
+    params: [
+      E('mode', 'Style', ['Blur', 'Pixelate', 'Solid']),
+      R('strength', 'Strength', .3, 2, .01, 1),
+      R('padding', 'Padding', 0, 1, .01, .35),
+      R('feather', 'Soft edge', 0, 1, .01, .3),
+      E('range', 'Look for', ['Close-up faces', 'Groups & distant faces']),
+      E('outline', 'Outline', ['Hidden', 'Shown']),
+    ] },
   { id: 'particles', node: 'particlesGPU1', fam: 'SOP', stage: 'scene', label: 'Particles', on: true,
     desc: 'Every sampled pixel becomes a glowing point. Brighter pixels float toward you.',
     params: [

@@ -1,5 +1,5 @@
 // WebGL2 renderer: scene pass (particles or image) → one pass per enabled operator, in user order → screen.
-import { VS_QUAD, VS_PART, FS_PART, FS_IMG, FS_BLIT, OP_FS } from './shaders.js';
+import { VS_QUAD, VS_PART, FS_PART, FS_IMG, FS_BLIT, FS_FACE, OP_FS } from './shaders.js';
 import { PALS } from './ops.js';
 
 export class Renderer {
@@ -7,7 +7,8 @@ export class Renderer {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
     if (!gl) throw new Error('WebGL2 is not available');
     this.gl = gl; this.canvas = canvas;
-    this.P = { part: this.prog(VS_PART, FS_PART), img: this.prog(VS_QUAD, FS_IMG), blit: this.prog(VS_QUAD, FS_BLIT) };
+    this.P = { part: this.prog(VS_PART, FS_PART), img: this.prog(VS_QUAD, FS_IMG), blit: this.prog(VS_QUAD, FS_BLIT), face: this.prog(VS_QUAD, FS_FACE) };
+    this.faceBuf = new Float32Array(16 * 4); this.fx = null;
     this.ops = {};
     for (const id in OP_FS) this.ops[id] = this.prog(VS_QUAD, OP_FS[id]);
     gl.bindVertexArray(gl.createVertexArray());
@@ -41,6 +42,7 @@ export class Renderer {
     const l = this.cur.u[name]; if (l == null) return; const gl = this.gl;
     if (v.length === 1) gl.uniform1f(l, v[0]); else if (v.length === 2) gl.uniform2f(l, v[0], v[1]); else gl.uniform3f(l, v[0], v[1], v[2]);
   }
+  f4v(name, arr) { const l = this.cur.u[name]; if (l != null) this.gl.uniform4fv(l, arr); }
   i(name, v) { const l = this.cur.u[name]; if (l != null) this.gl.uniform1i(l, v); }
   texParams(min) {
     const gl = this.gl;
@@ -59,6 +61,28 @@ export class Renderer {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.generateMipmap(gl.TEXTURE_2D);
     this.srcW = w || 1; this.srcH = h || 1;
+    const k = Math.min(1, 2048 / Math.max(this.srcW, this.srcH));
+    const fw = Math.max(2, Math.round(this.srcW * k)), fh = Math.max(2, Math.round(this.srcH * k));
+    if (!this.fx || this.fx.w !== fw || this.fx.h !== fh) {
+      if (this.fx) { gl.deleteFramebuffer(this.fx.f); gl.deleteTexture(this.fx.tex); }
+      this.fx = { ...this.target(fw, fh), w: fw, h: fh };
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    }
+  }
+
+  /** Hides faces on the source texture. Returns the texture the scene should sample. */
+  faceSource(F, faces) {
+    if (!F || !F.on || (!faces.cover && !faces.list.length) || !this.fx) return this.src;
+    const gl = this.gl, n = Math.min(16, faces.list.length);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fx.f); gl.viewport(0, 0, this.fx.w, this.fx.h);
+    this.use(this.P.face); this.bindTex(0, this.src); this.i('uSrc', 0);
+    for (let j = 0; j < n; j++) { const t = faces.list[j]; this.faceBuf.set([t.cx, t.cy, t.rx, t.ry], j * 4); }
+    this.f4v('uFaces[0]', this.faceBuf); this.i('uCount', n);
+    this.f('uSrcSize', this.fx.w, this.fx.h); this.f('uCover', faces.cover ? 1 : 0);
+    for (const k of ['mode', 'strength', 'padding', 'feather', 'outline']) this.f('u_' + k, F[k]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.bindTex(0, this.fx.tex); gl.generateMipmap(gl.TEXTURE_2D);
+    return this.fx.tex;
   }
 
   target(w, h) {
@@ -87,13 +111,14 @@ export class Renderer {
   }
 
   /** Draws one frame. Returns the number of particles drawn. */
-  render({ E, order, acc, mouse, mouseForce, time, flowT, rot, dpr, compare }) {
+  render({ E, order, acc, mouse, mouseForce, time, flowT, rot, dpr, compare, faces }) {
+    const src = this.faceSource(E.faceblur, faces);
     const gl = this.gl, { W, H } = this, aspect = W / H, fit = this.fit(), sa = this.srcW / this.srcH;
     const T = E.touch, force = T.on ? mouseForce * T.force : 0;
 
     if (compare) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
-      this.use(this.P.img); this.bindTex(0, this.src); this.i('uSrc', 0);
+      this.use(this.P.img); this.bindTex(0, src); this.i('uSrc', 0);
       this.f('uFit', ...fit); this.f('uMouse', 9, 9); this.f('uAspect', aspect); this.f('uMouseForce', 0); this.f('uMouseRad', .5);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       return 0;
@@ -102,7 +127,7 @@ export class Renderer {
     // scene
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.t.scene.f); gl.viewport(0, 0, W, H);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
-    this.bindTex(0, this.src);
+    this.bindTex(0, src);
     let count = 0;
     const P = E.particles;
     if (P.on) {

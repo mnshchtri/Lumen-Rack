@@ -6,6 +6,7 @@ import { AudioEngine } from './audio.js';
 import { createRecorder, saveBlob, stamp } from './recorder.js';
 import { defaultState, sanitize, fromPartial, encodeState, decodeState, History, store, clone } from './state.js';
 import { createUI, hydrateIcons } from './ui.js';
+import { FaceTracker } from './faces.js';
 
 const $ = s => document.querySelector(s);
 const KEY = 'lumen-rack:v2', PKEY = 'lumen-rack:presets', OKEY = 'lumen-rack:onboarded';
@@ -21,7 +22,7 @@ function start() {
   const app = {
     state: null, E: {}, selected: 'particles', activePreset: null,
     userPresets: store.get(PKEY, []),
-    audio: new AudioEngine(), sources: null, recorder: null,
+    audio: new AudioEngine(), faces: new FaceTracker(), sources: null, recorder: null,
   };
   let shared = false;
   const hash = new URLSearchParams(location.hash.slice(1)).get('s');
@@ -76,7 +77,8 @@ function start() {
       clearPreset(); app.commit(); ui.renderInspector(); ui.renderNetwork();
     },
     applyPreset(pr) {
-      app.state = fromPartial(pr.s); app.activePreset = pr.name; app.commit(); ui.renderAll();
+      const keepFace = app.state.ops.faceblur;
+      app.state = fromPartial(pr.s); app.state.ops.faceblur = keepFace; app.activePreset = pr.name; app.commit(); ui.renderAll();
       ui.toast(pr.name);
     },
     savePreset(name) {
@@ -127,6 +129,12 @@ function start() {
   app.sources = new Sources(renderer, {
     onChange(cur) {
       if (app.audio.kind === 'video') app.audio.detach();
+      app.faces.reset();
+      if (cur.kind === 'camera' && !app.state.ops.faceblur.on) {
+        app.state.ops.faceblur.on = true; app.commit(); ui.renderNetwork();
+        if (app.selected === 'faceblur') ui.renderInspector();
+        ui.toast('Face blur is on for the camera.');
+      }
       ui.renderSource(cur);
       if (cur.kind !== 'sample') dismissOnboard();
     },
@@ -224,6 +232,7 @@ function start() {
     if (cands.length && Math.random() < .55) for (let n = 0; n < 1 + Math.floor(Math.random() * 2); n++) {
       s.mods[pick(cands)] = { src: Math.random() < .6 ? 'lfo' : pick(['bass', 'level']), rate: r(.05, .6), depth: r(.1, .35) * (Math.random() < .5 ? -1 : 1) };
     }
+    s.ops.faceblur = clone(app.state.ops.faceblur);
     app.state = sanitize(s); app.activePreset = null; app.commit(); ui.renderAll();
     ui.toast('Randomized. Press Ctrl+Z to undo.');
   }
@@ -309,7 +318,7 @@ function start() {
 
   /* ---------- keyboard ---------- */
   const typing = t => (t.tagName === 'INPUT' && t.type !== 'range') || t.tagName === 'TEXTAREA' || t.isContentEditable;
-  const seq = () => ['particles', 'touch', ...app.state.order, 'out'];
+  const seq = () => ['faceblur', 'particles', 'touch', ...app.state.order, 'out'];
   addEventListener('keydown', e => {
     if (typing(e.target)) return;
     const k = e.key, mod = e.ctrlKey || e.metaKey;
@@ -361,7 +370,16 @@ function start() {
     for (const id in acc) for (const k in acc[id]) acc[id][k] += dt * E[id][k] * (id === 'kaleido' ? .8 : 1);
     mForce += ((E.touch.on ? mTarget : 0) - mForce) * Math.min(1, dt * 8);
 
-    const count = renderer.render({ E, order: app.state.order, acc, mouse, mouseForce: mForce, time: t, flowT, rot, dpr, compare });
+    const faces = { list: [], cover: false };
+    if (E.faceblur.on && app.sources.cur) {
+      const F = app.faces;
+      if (F.status === 'idle') F.load().catch(() => ui.toast('Face detection couldn’t start here, so the whole frame is blurred instead.', true));
+      if (F.ready) {
+        const kind = app.sources.cur.kind;
+        faces.list = F.update(app.sources.cur, now, { still: kind === 'photo' || kind === 'sample', group: E.faceblur.range === 1 });
+      } else faces.cover = true;
+    }
+    const count = renderer.render({ E, order: app.state.order, acc, mouse, mouseForce: mForce, time: t, flowT, rot, dpr, compare, faces });
 
     if (snapReq) {
       snapReq = false;
