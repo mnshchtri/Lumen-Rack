@@ -1,15 +1,27 @@
 # Lumen Rack
 
-Realtime effect rack for photos and videos, in the browser. Load an image or clip and run it through a chain of GPU operators in the spirit of TouchDesigner: particles, feedback trails, kaleidoscope, glitch, edge detection and color ramps. Everything runs locally on WebGL2; files never leave your machine.
+Realtime GPU effects for your photos and videos, in the browser. Load an image, clip or your camera, then build a look from a chain of operators in the spirit of TouchDesigner: particles, feedback, kaleidoscope, glitch, halftone, bloom and more. Any parameter can be animated by an LFO or by music. Everything runs locally on WebGL2; your files never leave your device.
 
 ## Features
 
-- **GPU particles**: every sampled pixel becomes a point; brightness drives depth. Turbulence, explode, orbit, cutoff, glow.
-- **Touch**: the pointer pushes particles and ripples the image (hold to push harder).
-- **Post chain**: displace, kaleidoscope, RGB split, slice glitch, pixelate, edge, color ramp, feedback.
-- **Node strip**: click an operator to bypass it, like a TouchDesigner network.
-- **Presets and Randomize**.
-- **Export**: PNG snapshot and video recording (MP4 where the browser supports it, otherwise WebM).
+**Sources**: photos, videos (with scrubbing), the camera, or the built-in sample. Drag and drop anywhere.
+
+**Operators**
+| Family | Operator | What it does |
+|---|---|---|
+| SOP | Particles | Turns pixels into a 3D point cloud: turbulence, explode, scatter, orbit, three point shapes |
+| CHOP | Touch | Pointer pushes, pulls or swirls the image |
+| TOP | Displace, Kaleidoscope, Mirror, Slice glitch, Pixelate, Halftone, Edge, Color ramp, Color adjust, RGB split, Feedback, Bloom | Post effects, each its own GPU pass |
+
+**Network**: effects run in the order shown. Drag a node to reorder, click to edit, use the power icon to bypass.
+
+**Animation**: press the wave icon beside any slider to modulate it with an LFO, or with the bass, mid, high or overall level of your mic, a song file or the video's own sound.
+
+**Workflow**: 9 presets plus your own saved ones, randomize, undo/redo, hold-to-compare with the original, share links that encode the whole look, auto-saved session, hide-panels mode, keyboard shortcuts (press `?`).
+
+**Export**: PNG snapshots and video recording (MP4 where supported, otherwise WebM), including the song or video audio.
+
+**Performance**: Auto quality lowers the render size when the frame rate drops.
 
 ## Run it
 
@@ -19,28 +31,29 @@ npm run dev      # http://localhost:5173
 npm run build    # static output in dist/
 ```
 
-The `dist/` folder is plain static files, so you can host it on GitHub Pages, Netlify, Vercel or any web server.
+Camera and microphone need HTTPS or `localhost`.
+
+## Deploy
+
+`dist/` is plain static files. On Cloudflare Workers, `wrangler.jsonc` serves it as static assets: build command `npm run build`, deploy command `npx wrangler deploy`. It also works on GitHub Pages, Netlify or Vercel.
 
 ## How it renders
 
-Each frame takes three passes:
-
-1. **Scene**: either the particle cloud (`gl.POINTS`, vertices generated from `gl_VertexID` with no vertex buffers) or the source image with a pointer ripple.
-2. **Post**: a single fragment shader applies the enabled operators in order, then blends in the previous frame for feedback (ping-pong framebuffers).
-3. **Blit**: draws to the screen with vignette and grain.
+1. **Scene**: the particle cloud (`gl.POINTS` with vertices generated from `gl_VertexID`, no vertex buffers) or the source image with the touch distortion.
+2. **Chain**: one fullscreen pass per enabled operator, in network order, ping-ponging between two render targets. Feedback keeps its own pair of textures; bloom samples mipmaps of its input.
+3. **Output**: vignette and grain, drawn to the screen.
 
 ```
 src/
-  main.js      UI, sources, pointer input, render loop
+  main.js      app state, actions, input, render loop
+  renderer.js  WebGL2 passes and render targets
+  shaders.js   GLSL for the scene and every operator
   ops.js       operator definitions, palettes, presets
-  shaders.js   GLSL ES 3.00 shaders
-  sample.js    procedural sample image
-  recorder.js  MediaRecorder video export, PNG save
+  ui.js        library, network, inspector, toasts, help
+  state.js     validation, share links, undo history, storage
+  audio.js     mic / song / video audio analysis
+  sources.js   image, video, camera, sample
+  recorder.js  video and PNG export
 ```
 
-## Roadmap
-
-- Visual node graph for wiring operators in any order
-- Audio-reactive parameters (Web Audio `AnalyserNode`)
-- Webcam input
-- Save and share custom presets
+Adding an operator: write a fragment shader in `shaders.js` (`OP_FS.<id>`, reading `uIn` and `u_<param>` uniforms) and add its definition to `OPS` in `ops.js`. The UI, presets, modulation and share links pick it up automatically.
